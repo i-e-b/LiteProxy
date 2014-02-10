@@ -82,20 +82,29 @@ namespace LiteProxyTests
         }
 
         [Test]
-        public void simple_methods_exposed_by_proxy_return_default_values()
+        public void methods_on_interface_throw_NotImplementedException_on_call ()
         {
             var fromInterface = DynamicProxy.GetInstanceFor<IInterfaceWithNoConcrete>();
 
-            try
-            {
-                fromInterface.FuncWithRefType(10, null);
-                fromInterface.FuncWithValType_1();
-                fromInterface.FuncWithValType_2();
-            }
-            catch (Exception ex)
-            {
-                Assert.Fail(ex.Message);
-            }
+            Assert.Throws<NotImplementedException>(() => fromInterface.FuncWithRefType(10, null));
+            Assert.Throws<NotImplementedException>(() => fromInterface.FuncWithValType_1());
+            Assert.Throws<NotImplementedException>(() => fromInterface.FuncWithValType_2());
+        }
+
+        [Test]
+        public void unimplemented_methods_on_abstract_throw_NotImplementedException_on_call()
+        {
+            var fromAbstract = DynamicProxy.GetInstanceFor<AbstractWithNoConcrete>();
+
+            Assert.Throws<NotImplementedException>(() => fromAbstract.Unimplemented());
+        }
+
+        [Test]
+        public void implemented_methods_on_abstract_invoke_on_call()
+        {
+            var fromAbstract = DynamicProxy.GetInstanceFor<AbstractWithNoConcrete>();
+
+            Assert.That(fromAbstract.RealMethod(), Is.EqualTo("Hi"));
         }  
          
     }
@@ -104,6 +113,8 @@ namespace LiteProxyTests
     {
         public string Name { get; set; }
         public abstract string Game { get; set; }
+        public abstract string Unimplemented();
+        public string RealMethod() { return "Hi"; }
     }
 
     public interface IInterfaceWithNoConcrete

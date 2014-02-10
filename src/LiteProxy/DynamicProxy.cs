@@ -118,32 +118,15 @@
                 );
 
             var methodILGen = methodBuilder.GetILGenerator();
-            if (methodInfo.ReturnType == typeof(void))
-            {
-                methodILGen.Emit(OpCodes.Ret);
-            }
-            else
-            {
-                if (methodInfo.ReturnType.IsPrimitive)
-                {
-                    methodILGen.Emit(OpCodes.Ldc_I4_0);
-                }
-                else if (methodInfo.ReturnType.IsValueType || methodInfo.ReturnType.IsEnum)
-                {
-                    var getMethod = typeof(Activator).GetMethod("CreateInstance",
-                                                                       new[] { typeof(Type) });
-                    var lb = methodILGen.DeclareLocal(methodInfo.ReturnType);
-                    methodILGen.Emit(OpCodes.Ldtoken, lb.LocalType);
-                    methodILGen.Emit(OpCodes.Call, typeof(Type).GetMethod("GetTypeFromHandle"));
-                    methodILGen.Emit(OpCodes.Callvirt, getMethod);
-                    methodILGen.Emit(OpCodes.Unbox_Any, lb.LocalType);
-                }
-                else
-                {
-                    methodILGen.Emit(OpCodes.Ldnull);
-                }
-                methodILGen.Emit(OpCodes.Ret);
-            }
+
+            // Unimplemented method -- throw an exception
+            var notImplemented = typeof(NotImplementedException);
+            var exCtorInfo = notImplemented.GetConstructor(new[] { typeof(string) });
+            if (exCtorInfo == null) throw new Exception("Could not find exception constructor. This is a major bug in DynamicProxy");
+            methodILGen.Emit(OpCodes.Ldstr, "The method \"" + methodInfo.Name + "\" is not implemented by DynamicProxy");
+            methodILGen.Emit(OpCodes.Newobj, exCtorInfo);
+            methodILGen.ThrowException(notImplemented);
+
             typeBuilder.DefineMethodOverride(methodBuilder, methodInfo);
         }
 
