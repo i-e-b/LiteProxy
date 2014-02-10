@@ -1,4 +1,5 @@
-﻿namespace LiteProxyTests
+﻿#pragma warning disable 183
+namespace LiteProxyTests
 {
     using System;
     using LiteProxy;
