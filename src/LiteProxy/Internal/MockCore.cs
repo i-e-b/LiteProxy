@@ -1,41 +1,104 @@
 ﻿namespace LiteProxy.Internal
 {
     using System;
-    using System.Collections;
     using System.Collections.Generic;
+    using System.Linq;
 
     /// <summary>
     /// Delegate core of mocking
     /// </summary>
     public class MockCore : IMock
     {
+        readonly List<Invocation> _callsMade;
+        readonly Dictionary<string, List<FilteredCallback>> _setups;
+        static readonly object Lock = new object();
+
+        /// <summary> Create a new mock core base </summary>
+        public MockCore()
+        {
+            _callsMade = new List<Invocation>();
+            _setups = new Dictionary<string, List<FilteredCallback>>();
+        }
+
         /// <summary>
         /// Delegate call for mock objects
         /// </summary>
         public object DelegateCall(string invocationName, object[] parameters)
         {
-            return null;
+            FilteredCallback callback = null;
+            lock (Lock)
+            {
+                var inv = new Invocation { MethodName = invocationName, Parameters = parameters };
+                _callsMade.Add(inv);
+
+                if (_setups.ContainsKey(invocationName))
+                {
+                    callback = _setups[invocationName].FirstOrDefault(i=>i.Predicate(inv));
+                }
+            }
+
+            return (callback == null) ? null : callback.Callback(new Type[0], parameters);
         }
 
+        /// <summary>
+        /// Returns an in-order list of calls made to the mock
+        /// </summary>
         public IEnumerable<Invocation> CallsMade()
         {
-            throw new NotImplementedException();
+            return _callsMade.ToList();
         }
 
+        /// <summary>
+        /// Clear list of recorded calls
+        /// </summary>
         public void ClearCalls()
         {
-            throw new NotImplementedException();
+            lock (Lock)
+            {
+                _callsMade.Clear();
+            }
         }
 
+        /// <summary>
+        /// Setup an invocation callback.
+        /// <para>Filter used to deterimine if callback should be used.</para>
+        /// <para>Each setup is used in order, and only once</para>
+        /// </summary>
         public void AddSetup(string methodName, Predicate<Invocation> filter, DelegateCallback callback)
         {
-            throw new NotImplementedException();
+            lock (Lock)
+            {
+                if (!_setups.ContainsKey(methodName)) _setups.Add(methodName, new List<FilteredCallback>());
+                _setups[methodName].Add(new FilteredCallback { Predicate = filter, Callback = callback});
+            }
         }
 
+        /// <summary>
+        /// Remove all setup callbacks
+        /// </summary>
         public void CleanSetups()
         {
-            throw new NotImplementedException();
+            lock (Lock)
+            {
+                _setups.Clear();
+            }
         }
+    }
+
+    /// <summary>
+    /// Callback with filter terms
+    /// </summary>
+    public class FilteredCallback
+    {
+        /// <summary>
+        /// Filter. If the predicate returns true, the callback will be called and consumed.
+        /// </summary>
+        public Predicate<Invocation> Predicate { get; set; }
+
+        /// <summary>
+        /// Callback actions
+        /// </summary>
+        public DelegateCallback Callback { get; set; }
     }
 
     /// <summary>
