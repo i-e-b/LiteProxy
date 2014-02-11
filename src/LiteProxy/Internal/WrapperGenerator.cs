@@ -22,6 +22,10 @@
             ProxyModule = asmBuilder.DefineDynamicModule("WrapperModule", false);
         }
 
+        /// <summary>
+        /// Create a new type wrapper binding calls of the source type to matching declarations
+        /// of the target type
+        /// </summary>
         public static Type GenerateWrapperType(Type targetType, Type sourceType)
         {
             var wrapperTypeName = sourceType.Name + "To" + targetType.Name + "Wrapper";
@@ -42,11 +46,60 @@
             return proxyBuilder.CreateType();
         }
 
+
+        /// <summary>
+        /// Create a new type wrapper that delegates call to the source
+        /// type through to a single delegate method in a mock body.
+        /// </summary>
+        public static Type GenerateMockType(Type targetType)
+        {
+            var wrapperTypeName = targetType.Name + "_Mock";
+
+            var pregenerated = ProxyModule.GetType(wrapperTypeName, false, false);
+            if (pregenerated != null) return pregenerated;
+
+            var proxyBuilder = GetProxyBuilder(targetType, wrapperTypeName);
+
+            var srcField = typeof(WrapperBase).GetField("Src", BindingFlags.Instance | BindingFlags.NonPublic);
+            if (srcField == null) throw new ApplicationException("Source binding failed!");
+
+            foreach (var method in targetType.GetMethods())
+            {
+                BindMockMethod(srcField, method, proxyBuilder);
+            }
+
+            return proxyBuilder.CreateType();
+        }
+
         private static TypeBuilder GetProxyBuilder(Type targetType, string wrapperTypeName)
         {
             return ProxyModule.DefineType(wrapperTypeName,
                                           TypeAttributes.NotPublic | TypeAttributes.Sealed | TypeAttributes.Class,
                                           typeof(WrapperBase), new[] { targetType });
+        }
+
+        private static void BindMockMethod(FieldInfo srcField, MethodInfo method, TypeBuilder proxyBuilder)
+        {
+            var parameters = method.GetParameters();
+            var parameterTypes = new Type[parameters.Length];
+            for (var i = 0; i < parameters.Length; i++) parameterTypes[i] = parameters[i].ParameterType;
+
+            var srcMethod = typeof(MockCore).GetMethod("DelegateCall");
+            if (srcMethod == null)
+                throw new Exception("MockCore object is malformed");
+
+            var methodBuilder = proxyBuilder
+                .DefineMethod(method.Name, MethodAttributes.Public | MethodAttributes.Virtual, method.ReturnType, parameterTypes);
+
+            var ilGenerator = methodBuilder.GetILGenerator();
+            ilGenerator.Emit(OpCodes.Ldarg_0);
+            ilGenerator.Emit(OpCodes.Ldfld, srcField);
+
+            for (var i = 1; i < parameters.Length + 1; i++) ilGenerator.Emit(OpCodes.Ldarg, i);
+
+            ilGenerator.Emit(method.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, srcMethod);
+            ilGenerator.Emit(OpCodes.Ret);
+
         }
 
         /// <summary>
@@ -74,12 +127,18 @@
             ilGenerator.Emit(OpCodes.Ret);
         }
 
+        /// <summary>
+        /// Create and instantiate a wrapper from the source type to the target type
+        /// </summary>
         public static WrapperBase GenerateWrapperPrototype(Type targetType, Type sourceType)
         {
             var wrapperType = GenerateWrapperType(targetType, sourceType);
             return (WrapperBase)Activator.CreateInstance(wrapperType);
         }
 
+        /// <summary>
+        /// Dispose
+        /// </summary>
         public void Dispose()
         {
             AppDomain.Unload(WrappersAppDomain);
