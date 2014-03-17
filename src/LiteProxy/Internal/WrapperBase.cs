@@ -17,4 +17,12 @@
             return newWrapper;
         }
     }
+
+    /// <summary>
+    /// 
+    /// </summary>
+    public class MockBase
+    {
+
+    }
 }

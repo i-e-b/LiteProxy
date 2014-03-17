@@ -58,10 +58,22 @@
             var pregenerated = ProxyModule.GetType(wrapperTypeName, false, false);
             if (pregenerated != null) return pregenerated;
 
-            var proxyBuilder = GetProxyBuilder(targetType, wrapperTypeName);
+            TypeBuilder proxyBuilder;
+            if (targetType.IsInterface)
+            {
+                proxyBuilder = ProxyModule.DefineType(wrapperTypeName,
+                    TypeAttributes.NotPublic | TypeAttributes.Sealed | TypeAttributes.Class,
+                    typeof(MockBase), new[] { targetType });
+            }
+            else
+            {
+                proxyBuilder = ProxyModule.DefineType(wrapperTypeName,
+                    TypeAttributes.NotPublic | TypeAttributes.Sealed | TypeAttributes.Class,
+                    targetType);
+            }
 
-            var srcField = typeof(WrapperBase).GetField("Src", BindingFlags.Instance | BindingFlags.NonPublic);
-            if (srcField == null) throw new ApplicationException("Source binding failed!");
+
+            var srcField = AddMockCore(proxyBuilder);
 
             foreach (var method in targetType.GetMethods())
             {
@@ -71,13 +83,33 @@
             return proxyBuilder.CreateType();
         }
 
-        private static TypeBuilder GetProxyBuilder(Type targetType, string wrapperTypeName)
+        /// <summary>
+        /// Add a field for the mock, and a constructor that populates it
+        /// </summary>
+        static FieldInfo AddMockCore(TypeBuilder builder)
         {
-            return ProxyModule.DefineType(wrapperTypeName,
-                                          TypeAttributes.NotPublic | TypeAttributes.Sealed | TypeAttributes.Class,
-                                          typeof(WrapperBase), new[] { targetType });
+            var field = builder.DefineField("__mockcore", typeof(IMock), FieldAttributes.Public);
+            var ctor = builder.DefineConstructor(MethodAttributes.Public, CallingConventions.HasThis, new Type[0]).GetILGenerator();
+            var coreCtor = typeof(MockCore).GetConstructor(new Type[] { });
+            var objCtor = typeof(object).GetConstructor(new Type[] {});
+
+            if (objCtor == null) throw new Exception("Compiler is malformed");
+            if (coreCtor == null) throw new Exception("MockCore object is malformed");
+
+            ctor.Emit(OpCodes.Ldarg_0);
+            ctor.Emit(OpCodes.Call, objCtor);
+
+            ctor.Emit(OpCodes.Ldarg_0);
+            ctor.Emit(OpCodes.Newobj, coreCtor);
+            ctor.Emit(OpCodes.Stfld, field);
+
+            ctor.Emit(OpCodes.Ret);
+            return field;
         }
 
+        /// <summary>
+        /// Re-bind method to `DelegateCall` in `__mockcore` field
+        /// </summary>
         private static void BindMockMethod(FieldInfo srcField, MethodInfo method, TypeBuilder proxyBuilder)
         {
             var parameters = method.GetParameters();
@@ -91,15 +123,26 @@
             var methodBuilder = proxyBuilder
                 .DefineMethod(method.Name, MethodAttributes.Public | MethodAttributes.Virtual, method.ReturnType, parameterTypes);
 
+            /*var methodBuilder = proxyBuilder
+                .DefineMethod(method.Name, MethodAttributes.Public | MethodAttributes.NewSlot, method.ReturnType, parameterTypes);*/
+
             var ilGenerator = methodBuilder.GetILGenerator();
-            ilGenerator.Emit(OpCodes.Ldarg_0);
-            ilGenerator.Emit(OpCodes.Ldfld, srcField);
+            /*ilGenerator.Emit(OpCodes.Ldarg_0);
 
             for (var i = 1; i < parameters.Length + 1; i++) ilGenerator.Emit(OpCodes.Ldarg, i);
 
+            ilGenerator.Emit(OpCodes.Ldfld, srcField);
             ilGenerator.Emit(method.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, srcMethod);
+            ilGenerator.Emit(OpCodes.Call, srcMethod);*/
             ilGenerator.Emit(OpCodes.Ret);
 
+        }
+
+        private static TypeBuilder GetProxyBuilder(Type targetType, string wrapperTypeName)
+        {
+            return ProxyModule.DefineType(wrapperTypeName,
+                                          TypeAttributes.NotPublic | TypeAttributes.Sealed | TypeAttributes.Class,
+                                          typeof(WrapperBase), new[] { targetType });
         }
 
         /// <summary>
@@ -142,6 +185,15 @@
         public void Dispose()
         {
             AppDomain.Unload(WrappersAppDomain);
+        }
+
+        /// <summary>
+        /// Create and instantiate a mock from the source type to the target type
+        /// </summary>
+        public static object GenerateMockPrototype(Type type)
+        {
+            var wrapperType = GenerateMockType(type);
+            return Activator.CreateInstance(wrapperType);
         }
     }
 }

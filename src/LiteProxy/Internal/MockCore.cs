@@ -165,10 +165,12 @@
         /// </summary>
         public static IMock AsMock(this object target)
         {
-            var core = target as MockCore;
-            if (core == null) throw new ArgumentException("Target was not a mock object", "target");
+            var core = target.GetType().GetField("__mockcore").GetValue(target);
 
-            return core;
+            var ret = core as IMock;
+            if (ret == null) throw new ArgumentException("Target was not a mock object", "target");
+
+            return ret;
         }
     }
 }

@@ -39,8 +39,10 @@
     <Reference Include="Microsoft.CSharp" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="beachhut.cs" />
     <Compile Include="DynamicProxyTests.cs" />
     <Compile Include="ExtractTests.cs" />
+    <Compile Include="MockTests.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
