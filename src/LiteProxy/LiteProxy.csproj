@@ -41,9 +41,11 @@
   <ItemGroup>
     <Compile Include="DynamicProxy.cs" />
     <Compile Include="Extract.cs" />
+    <Compile Include="Internal\DelegateBase.cs" />
     <Compile Include="Internal\MockCore.cs" />
     <Compile Include="Internal\WrapperBase.cs" />
     <Compile Include="Internal\WrapperGenerator.cs" />
+    <Compile Include="LazyDelegate.cs" />
     <Compile Include="Mock.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Internal\StaticWrapper.cs" />

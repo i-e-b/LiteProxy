@@ -9,7 +9,7 @@
         /// <summary>
         ///  WARNING: this field is directly referenced in the wrapper generator. Don't change it!
         /// </summary>
-        internal protected object Src;
+        protected internal object Src;
         internal object NewFromPrototype(object src)
         {
             var newWrapper = (WrapperBase)MemberwiseClone();

@@ -5,7 +5,7 @@
     using LiteProxy.Internal;
     using NUnit.Framework;
 
-    [TestFixture]
+    [TestFixture, Ignore("This is all experimental")]
     public class MockTests
     {
         SimpleClass _subject;
@@ -28,7 +28,7 @@
         public void calls_to_mock_are_routed_to_MockCore()
         {
             _subject.PublicVoidMethod();
-	    var mock = _subject.AsMock();
+            var mock = _subject.AsMock();
             Assert.That(mock.CallsMade(), Is.Not.Empty);
         }
     }
