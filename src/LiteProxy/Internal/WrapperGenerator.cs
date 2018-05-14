@@ -54,7 +54,7 @@ namespace LiteProxy.Internal
         /// Create a new type wrapper that delegates call to the source
         /// type through to a single delegate method in a mock body.
         /// </summary>
-        public static Type GenerateDirectDelegate(Type targetType)
+        public static Type GenerateDirectDelegate(Type targetType, string keyPropertyName)
         {
             if (targetType.IsInterface)
             {
@@ -62,6 +62,7 @@ namespace LiteProxy.Internal
             }
 
             var wrapperTypeName = targetType.Name + "_LazyDelegate";
+            if (!string.IsNullOrWhiteSpace(keyPropertyName)) wrapperTypeName += "Keyed_" + keyPropertyName;
 
             // cached version:
             var pregenerated = ProxyModule.GetType(wrapperTypeName, false, false);
@@ -74,9 +75,10 @@ namespace LiteProxy.Internal
 
             var makerType = typeof(Func<>).MakeGenericType(targetType);
 
+
             // field to hold lazy delegate
             var baseFld = proxyBuilder.DefineField("__base", targetType, FieldAttributes.Public);
-            var makerFld = proxyBuilder.DefineField("__baseMaker", makerType, FieldAttributes.Public); // constructor funtion
+            var makerFld = proxyBuilder.DefineField("__baseMaker", makerType, FieldAttributes.Public); // constructor function
 
             // method to generate the lazy delegate
             var ensurer = proxyBuilder.DefineMethod("__EnsureBase", MethodAttributes.Family | MethodAttributes.Public, CallingConventions.HasThis);
@@ -87,6 +89,14 @@ namespace LiteProxy.Internal
             {
                 var parameterTypes = prop.GetIndexParameters().Select(p=>p.ParameterType).ToArray();
                 var propertyBuilder = proxyBuilder.DefineProperty(prop.Name, PropertyAttributes.None, prop.PropertyType, parameterTypes);
+
+                if (prop.Name == keyPropertyName) {
+                    // field to hold key value
+                    var keyFld = proxyBuilder.DefineField("__keyBacking", prop.PropertyType, FieldAttributes.Public);
+                    // write a get/set property with a known-named backing field.
+                    BindGetSetToBackingField(proxyBuilder, propertyBuilder, prop, keyFld);
+                    continue;
+                }
 
                 if (prop.CanRead)
                 {
@@ -102,6 +112,35 @@ namespace LiteProxy.Internal
             return proxyBuilder.CreateType();
         }
 
+        private static void BindGetSetToBackingField(TypeBuilder proxyBuilder, PropertyBuilder propertyBuilder, PropertyInfo targetProperty, FieldBuilder backingField)
+        {
+            var setter = proxyBuilder.DefineMethod("set_" + targetProperty.Name,
+                MethodAttributes.Virtual | MethodAttributes.ReuseSlot | MethodAttributes.HideBySig | MethodAttributes.SpecialName | MethodAttributes.Public,
+                typeof(void), new[] { targetProperty.PropertyType });
+            
+            var getter = proxyBuilder.DefineMethod("get_" + targetProperty.Name,
+                MethodAttributes.Virtual | MethodAttributes.ReuseSlot | MethodAttributes.HideBySig | MethodAttributes.SpecialName | MethodAttributes.Public,
+                targetProperty.PropertyType, Type.EmptyTypes);
+            {
+                var gg = getter.GetILGenerator();
+                gg.Emit(OpCodes.Ldarg_0); // load 'this'
+                gg.Emit(OpCodes.Ldfld, backingField); // load the value
+                gg.Emit(OpCodes.Ret); // return the result.
+            }
+            {
+                var gs = setter.GetILGenerator();
+                gs.Emit(OpCodes.Ldarg_0); // load 'this'
+                gs.Emit(OpCodes.Ldarg_1); // load 'value'
+                gs.Emit(OpCodes.Stfld, backingField); // store value to the field
+                gs.Emit(OpCodes.Ret); // return the result.
+            }
+            propertyBuilder.SetGetMethod(getter);
+            propertyBuilder.SetSetMethod(setter);
+        }
+
+        /// <summary>
+        /// Bind a new `set_` method into a type, for a property. This will call an 'ensureProxyMethod' method, then pass the 'set' down to a proxy object
+        /// </summary>
         private static void DefineSetProxyProperty(TypeBuilder proxyBuilder, PropertyInfo targetProperty, Type[] parameterTypes,
             MethodInfo ensureProxyMethod, FieldInfo proxyInstanceField, PropertyBuilder propertyBuilder)
         {
@@ -128,7 +167,10 @@ namespace LiteProxy.Internal
             
             propertyBuilder.SetSetMethod(setter);
         }
-
+        
+        /// <summary>
+        /// Bind a new `get_` method into a type, for a property. This will call an 'ensureProxyMethod' method, then pass the 'get' down to a proxy object
+        /// </summary>
         private static void DefineGetProxyProperty(TypeBuilder proxyBuilder, PropertyInfo targetProperty, Type[] parameterTypes,
             MethodInfo ensureProxyMethod, FieldInfo proxyInstanceField, PropertyBuilder propertyBuilder)
         {
@@ -150,8 +192,10 @@ namespace LiteProxy.Internal
             }
 
             g.Emit(OpCodes.Callvirt, targetProperty.GetMethod); // call the underlying getter of the delegate
-            g.Emit(OpCodes.Stloc_0); // evaluation stack to local
-            g.Emit(OpCodes.Ldloc_0); // local back to evaluation stack
+
+            // The C# compiler does this, but it's not needed, we can leave the value on the stack:
+            //g.Emit(OpCodes.Stloc_0); // evaluation stack to local
+            //g.Emit(OpCodes.Ldloc_0); // local back to evaluation stack
 
             g.Emit(OpCodes.Ret); // return the result.
 

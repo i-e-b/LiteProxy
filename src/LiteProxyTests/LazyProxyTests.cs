@@ -68,7 +68,7 @@ namespace LiteProxyTests
         {
             EagerBeaver.InitCalled = false;
 
-            var lazy = LazyDelegate.ForKeyed<EagerBeaver>("Id", 123);
+            var lazy = LazyDelegate.ForKeyed("Id", 123, SideStructor);
             Assert.That(EagerBeaver.InitCalled, Is.False);
 
             var key = lazy.Id;
@@ -78,6 +78,20 @@ namespace LiteProxyTests
             var accessed = lazy.ItsComplicated;
             Assert.That(accessed, Is.EqualTo(7));
             Assert.That(EagerBeaver.InitCalled, Is.True);
+        }
+
+        [Test]
+        public void key_properties_can_be_updated ()
+        {
+            EagerBeaver.InitCalled = false;
+
+            var lazy = LazyDelegate.ForKeyed("Id", 123, SideStructor);
+
+            var key = lazy.Id;
+            Assert.That(key, Is.EqualTo(123), "Original key not set");
+
+            lazy.Id = 456;
+            Assert.That(lazy.Id, Is.EqualTo(456), "Failed to update key");
         }
 
         [Test]

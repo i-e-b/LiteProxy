@@ -4,8 +4,9 @@
 
     /// <summary>
     /// A very lightweight mocking object
+    /// (This is not yet fully implemented)
     /// </summary>
-    public class Mock
+    internal class Mock
     {
         /// <summary>
         /// Create a mock of type `T`

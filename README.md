@@ -1,7 +1,18 @@
 LiteProxy
 =========
 
-Tiny object proxying and mocking tools for C#
+Tiny object proxying tools for C#
+
+Features:
+---------
+
+`DynamicProxy.GetInstanceFor<...>();` -- Pass the type of an interface or abstract, and you will get an object instance that implements that type and backs the properties and fields.
+
+`Extract<Interface>.From(Instance)` -- Wraps an object instance in a proxy. Use this to coerce objects into interfaces they *could* implement.
+
+`LazyDelegate.For(...)` -- Wraps a constructor function in a proxy that overrides all virtual properties. Any access to the properties will cause the function to be invoked and calls passed to the result.
+
+`LazyDelegate.ForKeyed("Id", MyValue, ConstructorFunc)` -- Same as LazyDelegate.For, but this causes one named property with an initial value to skip the lazy invocation.
 
 TODO
 ------
