@@ -25,12 +25,6 @@ namespace LiteProxy
                 .GetField("__baseMaker", BindingFlags.Public | BindingFlags.Instance)
                ?.SetValue(actual, constructor);
 
-            
-            // TEST ONLY:
-            /*derivedType
-                .GetField("__base", BindingFlags.Public | BindingFlags.Instance)
-                ?.SetValue(actual, constructor());*/
-
             return actual;
         }
 

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using LiteProxy;
 using NUnit.Framework;
 
@@ -13,12 +14,52 @@ namespace LiteProxyTests
             EagerBeaver.InitCalled = false;
 
             var lazy = LazyDelegate.For(SideStructor);
-            //Assert.That(EagerBeaver.InitCalled, Is.False);
+            Assert.That(EagerBeaver.InitCalled, Is.False);
             
-            lazy.ItsComplicated = 4; // this should not have a setter!
             var accessed = lazy.ItsComplicated;
 
             Assert.That(accessed, Is.EqualTo(7));
+            Assert.That(EagerBeaver.InitCalled, Is.True);
+        }
+
+        [Test]
+        public void writing_to_a_virtual_indexer_will_load_base_object()
+        {
+            EagerBeaver.InitCalled = false;
+
+            var lazy = LazyDelegate.For(SideStructor);
+            Assert.That(EagerBeaver.InitCalled, Is.False, "Init called before");
+            
+            lazy[1] = 8;
+
+            Assert.That(EagerBeaver.InitCalled, Is.True, "Init called after");
+            Assert.That(lazy[1], Is.EqualTo(8), "lazy instance's value");
+        }
+        [Test]
+        public void writing_to_a_virtual_property_will_load_base_object()
+        {
+            EagerBeaver.InitCalled = false;
+
+            var lazy = LazyDelegate.For(SideStructor);
+            Assert.That(EagerBeaver.InitCalled, Is.False, "Init called before");
+            
+            lazy.ItsComplicated = 4;
+
+            Assert.That(EagerBeaver.InitCalled, Is.True, "Init called after");
+            Assert.That(lazy.ItsComplicated, Is.EqualTo(4), "lazy instance's value");
+        }
+
+        [Test]
+        public void accessing_a_virtual_indexer_will_load_base_object()
+        {
+            EagerBeaver.InitCalled = false;
+
+            var lazy = LazyDelegate.For(SideStructor);
+            Assert.That(EagerBeaver.InitCalled, Is.False);
+            
+            var accessed = lazy[1];
+
+            Assert.That(accessed, Is.EqualTo(2));
             Assert.That(EagerBeaver.InitCalled, Is.True);
         }
 
@@ -44,7 +85,7 @@ namespace LiteProxyTests
         {
             var msg = Assert.Throws<Exception>(() =>
             {
-                var wrong = LazyDelegate.ForKeyed<IEagerBeaver>("Id", 123);
+                var _ = LazyDelegate.For<IEagerBeaver>(SideStructor);
             }).Message;
 
             Assert.That(msg, Is.EqualTo("Interfaces can't be delegated to"));
@@ -66,17 +107,19 @@ namespace LiteProxyTests
         int Id { get; set; }
     }
 
-    public class EagerBeaver:IEagerBeaver {
-        public static bool InitCalled = false;
+    public class EagerBeaver : IEagerBeaver
+    {
+        public static bool InitCalled;
 
         public virtual int ItsComplicated { get; set; }
 
         public virtual int Id { get; set; }
 
-        public EagerBeaver()
+        private readonly List<int> _backing = new List<int>(new[] { 1, 2, 3 });
+        public virtual int this[int idx]
         {
-            //InitCalled = true;
-            //ItsComplicated = 7; // pretend this is loaded from an expensive resource
+            get { return _backing[idx]; }
+            set { _backing[idx] = value; }
         }
     }
 }

@@ -1,8 +1,10 @@
-﻿using System.Linq;
-
+﻿// This file contains the bulk of the low-level proxying.
+// It's a mess of direct IL generation, with mixed concerns.
+// Start at one of the non-internal classes and work your way back here.
 namespace LiteProxy.Internal
 {
     using System;
+    using System.Linq;
     using System.Reflection;
     using System.Reflection.Emit;
     using System.Threading;
@@ -71,8 +73,6 @@ namespace LiteProxy.Internal
                 targetType);
 
             var makerType = typeof(Func<>).MakeGenericType(targetType);
-            var makerInvokeCall = makerType.GetMethod("Invoke", BindingFlags.Instance | BindingFlags.Public);
-            if (makerInvokeCall == null) throw new Exception("Could not find invoker for constructor function");
 
             // field to hold lazy delegate
             var baseFld = proxyBuilder.DefineField("__base", targetType, FieldAttributes.Public);
@@ -80,74 +80,107 @@ namespace LiteProxy.Internal
 
             // method to generate the lazy delegate
             var ensurer = proxyBuilder.DefineMethod("__EnsureBase", MethodAttributes.Family | MethodAttributes.Public, CallingConventions.HasThis);
-            var ensGen = ensurer.GetILGenerator();
-            var retEnd = ensGen.DefineLabel(); // label for return
-            ensGen.DeclareLocal(typeof(bool));
-            ensGen.Emit(OpCodes.Ldarg_0); // load 'this'
-            ensGen.Emit(OpCodes.Ldfld, baseFld); // load the '__base' ref
-            ensGen.Emit(OpCodes.Ldnull); // load a null
-            ensGen.Emit(OpCodes.Ceq); // compare: __base == null
-            ensGen.Emit(OpCodes.Brfalse_S, retEnd); // if not null, jump to return
+            EmitEnsureBaseFunction(ensurer, baseFld, makerFld, makerType);
 
-
-            ensGen.Emit(OpCodes.Ldarg_0); // load 'this'
-            ensGen.Emit(OpCodes.Ldarg_0); // load 'this'
-            ensGen.Emit(OpCodes.Ldfld, makerFld); // load constructor function of this instance
-            ensGen.Emit(OpCodes.Callvirt, makerInvokeCall); // call constructor function against that instance
-            ensGen.Emit(OpCodes.Stfld, baseFld); // store result in the holding field
-
-            ensGen.MarkLabel(retEnd); // set label to this position
-            ensGen.Emit(OpCodes.Ret);
-
-            //var srcField = AddMockCore(proxyBuilder); // TODO: need an 'ensure created' and re-pipe call
-            /*var rebindMethod = AddRebindingMethod(proxyBuilder);
-
-            foreach (var method in targetType.GetMethods())
-            {
-                BindMethod(rebindMethod, method, proxyBuilder);
-                //BindProxyMethod(targetType, proxyBuilder, srcField, method, proxyBuilder);
-            }*/
 
             foreach (var prop in targetType.GetProperties())
             {
-                var parameterTypes = prop.GetIndexParameters().Select(p=>p.GetType()).ToArray();
-                var buil = proxyBuilder.DefineProperty(prop.Name, PropertyAttributes.None, prop.PropertyType, parameterTypes);
+                var parameterTypes = prop.GetIndexParameters().Select(p=>p.ParameterType).ToArray();
+                var propertyBuilder = proxyBuilder.DefineProperty(prop.Name, PropertyAttributes.None, prop.PropertyType, parameterTypes);
 
-                // write a getter method, that calls down to the ensure function, then calls delegate.
-                var getter = proxyBuilder.DefineMethod("get_" + prop.Name, MethodAttributes.Virtual | MethodAttributes.ReuseSlot | MethodAttributes.HideBySig | MethodAttributes.SpecialName | MethodAttributes.Public,
-                    prop.PropertyType, parameterTypes);
-                var gb = getter.GetILGenerator();
-
-                gb.DeclareLocal(typeof(object));
-                gb.Emit(OpCodes.Ldarg_0);// load 'this'
-                gb.Emit(OpCodes.Call, ensurer); // call the ensurer function
-
-                gb.Emit(OpCodes.Ldarg_0);// load 'this'
-                gb.Emit(OpCodes.Ldfld, baseFld); // load the ensured delegate
-                gb.Emit(OpCodes.Callvirt, prop.GetMethod); // call the underlying getter of the delegate
-                gb.Emit(OpCodes.Stloc_0); // evaluation stack to local
-                gb.Emit(OpCodes.Ldloc_0);// local back to evaluation stack
-
-                gb.Emit(OpCodes.Ret); // return the result.
-
-                buil.SetGetMethod(getter);
-
-
-                // TODO: write setter logic
-                //buil.SetSetMethod(getter);
-                /*if (prop.CanRead)
+                if (prop.CanRead)
                 {
-                    //BindMethod(rebindMethod, prop.GetMethod, proxyBuilder);
-                    //BindProxyMethod(targetType, proxyBuilder, srcField, prop.GetMethod, proxyBuilder);
+                    DefineGetProxyProperty(proxyBuilder, prop, parameterTypes, ensurer, baseFld, propertyBuilder);
                 }
+
                 if (prop.CanWrite)
                 {
-                    //BindMethod(rebindMethod, prop.SetMethod, proxyBuilder);
-                    //BindProxyMethod(targetType, proxyBuilder, srcField, prop.SetMethod, proxyBuilder);
-                }*/
+                    DefineSetProxyProperty(proxyBuilder, prop, parameterTypes, ensurer, baseFld, propertyBuilder);
+                }
             }
 
             return proxyBuilder.CreateType();
+        }
+
+        private static void DefineSetProxyProperty(TypeBuilder proxyBuilder, PropertyInfo targetProperty, Type[] parameterTypes,
+            MethodInfo ensureProxyMethod, FieldInfo proxyInstanceField, PropertyBuilder propertyBuilder)
+        {
+            var setParams = parameterTypes.Concat(new[] { targetProperty.PropertyType }).ToArray(); // add 'value' param
+            var setter = proxyBuilder.DefineMethod("set_" + targetProperty.Name,
+                MethodAttributes.Virtual | MethodAttributes.ReuseSlot | MethodAttributes.HideBySig | MethodAttributes.SpecialName | MethodAttributes.Public,
+                typeof(void), setParams);
+            var g = setter.GetILGenerator();
+
+            g.Emit(OpCodes.Ldarg_0); // load 'this'
+            g.Emit(OpCodes.Call, ensureProxyMethod); // call the ensurer function
+
+            g.Emit(OpCodes.Ldarg_0); // load 'this'
+            g.Emit(OpCodes.Ldfld, proxyInstanceField); // load the ensured delegate
+            
+            g.Emit(OpCodes.Ldarg_1); // load 'value'
+            for (int i = 0; i < parameterTypes.Length; i++)
+            {
+                g.Emit(OpCodes.Ldarg, i + 2); // load parameters
+            }
+
+            g.Emit(OpCodes.Callvirt, targetProperty.SetMethod); // call the underlying setter of the delegate
+            g.Emit(OpCodes.Ret); // return control (no result).
+            
+            propertyBuilder.SetSetMethod(setter);
+        }
+
+        private static void DefineGetProxyProperty(TypeBuilder proxyBuilder, PropertyInfo targetProperty, Type[] parameterTypes,
+            MethodInfo ensureProxyMethod, FieldInfo proxyInstanceField, PropertyBuilder propertyBuilder)
+        {
+// write a getter method, that calls down to the ensure function, then calls delegate.
+            var getter = proxyBuilder.DefineMethod("get_" + targetProperty.Name, MethodAttributes.Virtual | MethodAttributes.ReuseSlot | MethodAttributes.HideBySig | MethodAttributes.SpecialName | MethodAttributes.Public,
+                targetProperty.PropertyType, parameterTypes);
+            var g = getter.GetILGenerator();
+
+            g.DeclareLocal(typeof(object));
+            g.Emit(OpCodes.Ldarg_0); // load 'this'
+            g.Emit(OpCodes.Call, ensureProxyMethod); // call the ensurer function
+
+            g.Emit(OpCodes.Ldarg_0); // load 'this'
+            g.Emit(OpCodes.Ldfld, proxyInstanceField); // load the ensured delegate
+
+            for (int i = 0; i < parameterTypes.Length; i++)
+            {
+                g.Emit(OpCodes.Ldarg, i + 1);
+            }
+
+            g.Emit(OpCodes.Callvirt, targetProperty.GetMethod); // call the underlying getter of the delegate
+            g.Emit(OpCodes.Stloc_0); // evaluation stack to local
+            g.Emit(OpCodes.Ldloc_0); // local back to evaluation stack
+
+            g.Emit(OpCodes.Ret); // return the result.
+
+            propertyBuilder.SetGetMethod(getter);
+        }
+
+        private static void EmitEnsureBaseFunction(MethodBuilder methodBuilder, FieldBuilder fieldToPopulate, FieldBuilder generatorFunctionField, Type generatorType)
+        {
+            var makerInvokeCall = generatorType.GetMethod("Invoke", BindingFlags.Instance | BindingFlags.Public);
+            if (makerInvokeCall == null) throw new Exception("Could not find invoker for constructor function");
+
+            var g = methodBuilder.GetILGenerator();
+            var retEnd = g.DefineLabel(); // label for return
+            g.DeclareLocal(typeof(bool));
+            g.Emit(OpCodes.Ldarg_0); // load 'this'
+            g.Emit(OpCodes.Ldfld, fieldToPopulate); // load the '__base' ref
+            g.Emit(OpCodes.Ldnull); // load a null
+            g.Emit(OpCodes.Ceq); // compare: __base == null
+            g.Emit(OpCodes.Brfalse_S, retEnd); // if not null, jump to return
+
+
+            g.Emit(OpCodes.Ldarg_0); // load 'this'
+            g.Emit(OpCodes.Ldarg_0); // load 'this'
+            g.Emit(OpCodes.Ldfld, generatorFunctionField); // load constructor function of this instance
+            g.Emit(OpCodes.Callvirt, makerInvokeCall); // call constructor function against that instance
+            g.Emit(OpCodes.Stfld, fieldToPopulate); // store result in the holding field
+
+            g.MarkLabel(retEnd); // set label to this position
+            g.Emit(OpCodes.Ret);
         }
 
         /// <summary>
@@ -186,30 +219,6 @@ namespace LiteProxy.Internal
             return proxyBuilder.CreateType();
         }
         
-        /// <summary>
-        /// Add a field for the mock, and a constructor that populates it
-        /// </summary>
-        static MethodInfo AddRebindingMethod(TypeBuilder builder)
-        {
-            var method = builder.DefineMethod("__mockcore", MethodAttributes.Public);
-            //var ctor = builder.DefineConstructor(MethodAttributes.Public, CallingConventions.HasThis, new Type[0]).GetILGenerator();
-            //var coreCtor = typeof(MockCore).GetConstructor(new Type[] { });
-            //var objCtor = typeof(object).GetConstructor(new Type[] {});
-
-            var gen = method.GetILGenerator();
-
-            /*gen.Emit(OpCodes.Ldarg_0);
-            gen.Emit(OpCodes.Call, objCtor);
-
-            gen.Emit(OpCodes.Ldarg_0);
-            gen.Emit(OpCodes.Newobj, coreCtor);
-            gen.Emit(OpCodes.Stfld, field);
-            */
-            gen.Emit(OpCodes.Ldarg_0);
-            gen.Emit(OpCodes.Ret);
-
-            return method;
-        }
 
         /// <summary>
         /// Add a field for the mock, and a constructor that populates it
@@ -271,28 +280,6 @@ namespace LiteProxy.Internal
             return ProxyModule.DefineType(wrapperTypeName,
                                           TypeAttributes.NotPublic | TypeAttributes.Sealed | TypeAttributes.Class,
                                           typeof(WrapperBase), new[] { targetType });
-        }
-
-        
-        /// <summary>
-        /// Emit a new method in a target type that calls a method from the source type.
-        /// </summary>
-        private static void BindMethod(MethodInfo methodToCall, MethodInfo methodOnDelegate, TypeBuilder proxyBuilder)
-        {
-            var parameters = methodOnDelegate.GetParameters();
-            var parameterTypes = new Type[parameters.Length];
-            for (var i = 0; i < parameters.Length; i++) parameterTypes[i] = parameters[i].ParameterType;
-
-            var methodBuilder = proxyBuilder
-                .DefineMethod(methodOnDelegate.Name, MethodAttributes.Public | MethodAttributes.Virtual, methodOnDelegate.ReturnType, parameterTypes);
-
-            var ilGenerator = methodBuilder.GetILGenerator();
-            ilGenerator.Emit(OpCodes.Ldarg_0);
-            /*ilGenerator.Emit(OpCodes.Ldfld, srcField);
-            for (var i = 1; i < parameters.Length + 1; i++) ilGenerator.Emit(OpCodes.Ldarg, i);
-            */
-            ilGenerator.Emit(methodOnDelegate.IsVirtual ? OpCodes.Callvirt : OpCodes.Call, methodToCall);
-            ilGenerator.Emit(OpCodes.Ret);
         }
 
         /// <summary>
