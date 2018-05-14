@@ -75,6 +75,8 @@ namespace LiteProxy.Internal
 
             var makerType = typeof(Func<>).MakeGenericType(targetType);
 
+            // Make a constructor that DOES NOT call the base type
+            BypassConstructorChain(proxyBuilder);
 
             // field to hold lazy delegate
             var baseFld = proxyBuilder.DefineField("__base", targetType, FieldAttributes.Public);
@@ -112,6 +114,27 @@ namespace LiteProxy.Internal
             return proxyBuilder.CreateType();
         }
 
+        /// <summary>
+        /// Replace the default constructor with one that call direct to object's one.
+        /// This means any constructor actions are skipped
+        /// </summary>
+        private static void BypassConstructorChain(TypeBuilder proxyBuilder)
+        {
+            var constr = proxyBuilder.DefineConstructor(MethodAttributes.Public | MethodAttributes.HideBySig | MethodAttributes.RTSpecialName | MethodAttributes.SpecialName,
+                CallingConventions.Standard, Type.EmptyTypes);
+            var cg = constr.GetILGenerator();
+
+            var octor = typeof(object).GetConstructor(Type.EmptyTypes);
+            if (octor == null) throw new Exception("Can't find root constructor");
+
+            cg.Emit(OpCodes.Ldarg_0); // load 'this'
+            cg.Emit(OpCodes.Call, octor); // call [mscorlib]System.Object::.ctor()
+            cg.Emit(OpCodes.Ret); // return
+        }
+
+        /// <summary>
+        /// Make a get and set method to back a property, and bind it
+        /// </summary>
         private static void BindGetSetToBackingField(TypeBuilder proxyBuilder, PropertyBuilder propertyBuilder, PropertyInfo targetProperty, FieldBuilder backingField)
         {
             var setter = proxyBuilder.DefineMethod("set_" + targetProperty.Name,

@@ -105,6 +105,14 @@ namespace LiteProxyTests
             Assert.That(msg, Is.EqualTo("Interfaces can't be delegated to"));
         }
 
+        [Test]
+        public void can_handle_constructor_chains_that_reference_properties()
+        {
+            var lazy = LazyDelegate.For(ChainConstructor);
+
+            Assert.That(lazy.ThingA, Is.EqualTo("PhilsFace"));
+        }
+
         public EagerBeaver SideStructor()
         {
             EagerBeaver.InitCalled = true;
@@ -112,6 +120,10 @@ namespace LiteProxyTests
             {
                 ItsComplicated = 7
             };
+        }
+        public TopOfChain ChainConstructor()
+        {
+            return new TopOfChain();
         }
     }
 
@@ -134,6 +146,26 @@ namespace LiteProxyTests
         {
             get { return _backing[idx]; }
             set { _backing[idx] = value; }
+        }
+    }
+
+    public class TopOfChain : MiddleOfChain
+    {
+        public virtual object Whatever { get; set; }
+
+        public TopOfChain()
+        {
+            Whatever = new object();
+        }
+    }
+
+    public class MiddleOfChain
+    {
+        public virtual string ThingA { get; set; }
+
+        public MiddleOfChain()
+        {
+            ThingA = "PhilsFace";
         }
     }
 }
